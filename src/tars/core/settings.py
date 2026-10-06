@@ -61,7 +61,7 @@ def add_credentials(server_name , database_name):
                         "host": server_name,
                         "database": database_name,
                         "username": "",  # Set as empty string to pass dlt validation
-                        "password": "",  # Set as empty string to pass dlt validation
+                        "password": "***REMOVED***",  # Set as empty string to pass dlt validation
                         "port": 1433,
                         "driver": "ODBC Driver 18 for SQL Server",
                         "query": {

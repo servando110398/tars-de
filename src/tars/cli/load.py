@@ -100,8 +100,8 @@ def load_file(ctx:typer.Context,
 
 
     file_extension = Path(file_name).suffix[1:]
-
-    file_path = source / file_source["relative_path"]
+    file_path = Path(file_name).resolve()
+    #file_path = source / file_source["relative_path"]
     new_file_name = f"{file_path.stem}__{timestamp}{file_path.suffix}"
 
     reader = (file_source |  strategy[file_extension]).with_name(table_name)
@@ -114,9 +114,9 @@ def load_file(ctx:typer.Context,
         duration = trace.finished_at - trace.started_at
         seconds = duration.total_seconds()
         message = f"[green]:white_check_mark: Done. File {file_name} has been processed. \n{total_rows} rows ingested in {seconds:.2f} seconds[/green]"
-    except:
+    except Exception as e:
         shutil.move(file_path,failed_dir/new_file_name)
-        message = "[red]:x: load failed![/red]"
+        message = f"[red]:x: load failed![/red] \n {e}"
     finally:
         print(message)
-        typer.Exit()
+        raise typer.Exit()

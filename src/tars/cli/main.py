@@ -42,7 +42,7 @@ def exit():
 
 #@app.result_callback()
 def main(ctx:typer.Context):
-
+    
     welcome()
     ensure_files()
 
