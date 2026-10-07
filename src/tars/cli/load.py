@@ -3,12 +3,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 import dlt
+from openpyxl import reader
 import typer
 from dlt.destinations import mssql
-from dlt.sources.filesystem import filesystem , read_csv
+from dlt.sources.filesystem import filesystem 
 from rich import print
-from tars.core.files import setup_folders
-from tars.core.readers import read_excel
+from tars.core.files import setup_folders , _get_file_extension
+from tars.core.readers import read_excel , read_csv
+from dlt.common.storages.fsspec_filesystem import FileItemDict
+import os 
+from dlt.pipeline.exceptions import PipelineStepFailed
+""" 
+Build a single function for procesisng files that is reused by load_files and load_file. 
+
+"""
 
 strategy ={"csv":read_csv, "xls":read_excel , "xlsx":read_excel}
 
@@ -23,8 +31,6 @@ def load_files(
     Load all files with the selected extension from the source folder into the target schema and table using the selected load strategy.
     """
     creds = ctx.obj["creds"]
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     pipeline = dlt.pipeline(
             pipeline_name="file_to_mssql_pipeline",
             destination=mssql(credentials=creds),
@@ -36,9 +42,6 @@ def load_files(
         file_glob=("*."+file_extension)  # Filter for specific file types if needed
         )
 
-
-    archive_dir , failed_dir , source  = setup_folders(source_folder=source_folder)
-
     files_processed = 0
     failed_files = 0
     total_rows = 0
@@ -49,22 +52,17 @@ def load_files(
     print(f"Files found: {total_files}")
 
     for file in list(files):  # snapshot the folder before moving anything
-          file_name = file["file_name"]
-          print(f"Processing file : {file_name} ...")
-          file_path = source / file["relative_path"]
-          new_file_name = f"{file_path.stem}__{timestamp}{file_path.suffix}"
-          reader = ([file] | strategy[file_extension]()).with_name(table_name)
-
-          try:
-            load_info = pipeline.run(reader , load_strategy)
-            rows = load_info.metrics['row_counts'][table_name]
-            shutil.move(file_path, archive_dir / new_file_name)
+        print(f"Processing file : {file['file_name']} ...")
+        load_info = _process_file(file=file, table_name=
+                                  table_name, load_strategy=load_strategy, pipeline=pipeline)
+        if load_info.has_failed_jobs:
+            failed_files += 1
+        else:
+            row_counts = pipeline.last_trace.last_normalize_info.row_counts
+            rows = sum(n for table, n in row_counts.items() if not table.startswith("_dlt"))
+            total_rows += rows
             files_processed += 1
-            total_rows = total_rows + rows
-          except:
-                failed_files += 1
-                shutil.move(file_path, failed_dir / new_file_name)
-
+            
     print(f"Processed files: {files_processed}")
     print(f"Total rows ingested: {total_rows}")
     print(f"Failed files: {failed_files}")
@@ -78,45 +76,73 @@ def load_file(ctx:typer.Context,
     """
     Load file into the specified target schema and table using the selected load strategy.
     """
-
-    print(f"Processing file : {file_name} ...")
-
     creds = ctx.obj["creds"]
-    
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     pipeline = dlt.pipeline(
             pipeline_name="file_to_mssql_pipeline",
-            #destination="mssql",
             destination=mssql(credentials=creds),
             dataset_name=schema_name  # This will map to a schema in SQL Server
         )
-    current_dir = str(Path.cwd() / "")
-    archive_dir , failed_dir , source  = setup_folders(source_folder=current_dir)
 
-    file_source = filesystem(
-    bucket_url=current_dir,  # Path to the parent folder
-    file_glob=f"{file_name}*"# Add * to match the exact single file
-    )
+    bucket_url = os.path.dirname(os.path.abspath(file_name))
+    # Grabs the very first FileItemDict directly out of the generator
+    file_obj = next(iter(filesystem(bucket_url=bucket_url, file_glob=file_name)))
 
+    print(f"Processing file : {file_name} ...")
+    load_info = _process_file(file=file_obj, table_name=table_name, load_strategy=load_strategy, pipeline=pipeline)
 
-    file_extension = Path(file_name).suffix[1:]
-    file_path = Path(file_name).resolve()
-    #file_path = source / file_source["relative_path"]
-    new_file_name = f"{file_path.stem}__{timestamp}{file_path.suffix}"
+    if load_info.has_failed_jobs:
+        failed_files += 1
+        message = f"[red]:x: load failed![/red] \n {load_info.errors}"    
+    else:
+        #job_metrics = load_info.metrics.get("job_metrics", {})
 
-    reader = (file_source |  strategy[file_extension]).with_name(table_name)
+        row_counts = pipeline.last_trace.last_normalize_info.row_counts
+        total_rows = sum(n for table, n in row_counts.items() if not table.startswith("_dlt"))
 
-    try:
-        load_info = pipeline.run(reader, write_disposition=load_strategy)
-        shutil.move(file_path,archive_dir/new_file_name)
-        total_rows = load_info.metrics['row_counts'][table_name]
         trace = pipeline.last_trace
         duration = trace.finished_at - trace.started_at
         seconds = duration.total_seconds()
         message = f"[green]:white_check_mark: Done. File {file_name} has been processed. \n{total_rows} rows ingested in {seconds:.2f} seconds[/green]"
+
+    print(message)
+            
+
+
+def _process_file(file: FileItemDict,table_name,load_strategy,pipeline):
+    """
+    Process a single file and return the load info object.
+    """
+    file_extension = _get_file_extension(file)
+    reader = ([file] | strategy[file_extension]()).with_name(table_name)
+    file_path = Path(file["relative_path"])
+    source_folder = Path(file["relative_path"]).resolve().parent
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_dir , failed_dir = setup_folders(source_folder=source_folder)
+    new_file_name = f"{file_path.stem}__{timestamp}{file_path.suffix}" 
+    load_info = None  
+
+    try:    
+        load_info = pipeline.run(reader, write_disposition= load_strategy)
+    
+        # Check for dlt's internal job failures (Scenario 2)
+        if load_info.has_failed_jobs:
+            shutil.move(file_path, failed_dir / new_file_name)
+        else:
+            shutil.move(file_path, archive_dir / new_file_name)
+
+    except PipelineStepFailed as step_failed:
+        # Extract the partial load info from the dlt exception (Scenario 1)
+        load_info = step_failed.step_info  
+        shutil.move(file_path, failed_dir / new_file_name)
+
     except Exception as e:
-        shutil.move(file_path,failed_dir/new_file_name)
-        message = f"[red]:x: load failed![/red] \n {e}"
+        # Catch-all for non-dlt exceptions (like OS/File errors)
+        #shutil.move(file_path, failed_dir / new_file_name)
+        print(f"[red]:x: An error occurred while processing {file_path}: {e}[/red]")
+        typer.Exit()
     finally:
-        print(message)
-        raise typer.Exit()
+        if load_info is None:
+            # If load_info is still None, create a dummy object to avoid further errors
+            load_info = type('LoadInfo', (object,), {'has_failed_jobs': True, 'errors': ['Unknown error occurred'], 'metrics': {}})()   
+        return load_info
+

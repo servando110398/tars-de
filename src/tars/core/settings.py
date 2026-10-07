@@ -57,18 +57,19 @@ def add_connection(server_name , database_name):
 
 def add_credentials(server_name , database_name):
     mssql_credentials = {
-                        "drivername": "mssql+pyodbc",
-                        "host": server_name,
-                        "database": database_name,
-                        "username": "",  # Set as empty string to pass dlt validation
-                        "password": "***REMOVED***",  # Set as empty string to pass dlt validation
-                        "port": 1433,
-                        "driver": "ODBC Driver 18 for SQL Server",
-                        "query": {
-                                "Trusted_Connection": "yes",
-                                 "TrustServerCertificate": "yes"
-                                }
-                        }
+    "drivername": "mssql+pyodbc",
+    "host": server_name,
+    "database": database_name,
+    "username": "sa", 
+    "password": "***REMOVED***", 
+    "port": 1433,
+    "query": {
+        "driver": "ODBC Driver 18 for SQL Server",
+        "Encrypt": "yes",
+        "TrustServerCertificate": "yes"
+    }
+}
+
     with open(creds_path,"w",encoding="utf-8") as file:
                     json.dump(mssql_credentials,file,indent=4)
     
