@@ -8,6 +8,7 @@ import typer
 from dlt.destinations import mssql
 from dlt.sources.filesystem import filesystem 
 from rich import print
+from tars.cli.connections import resolve_credentials
 from tars.core.files import setup_folders , _get_file_extension
 from tars.core.readers import read_excel , read_csv
 from dlt.common.storages.fsspec_filesystem import FileItemDict
@@ -30,7 +31,7 @@ def load_files(
     """
     Load all files with the selected extension from the source folder into the target schema and table using the selected load strategy.
     """
-    creds = ctx.obj["creds"]
+    creds = resolve_credentials()
     pipeline = dlt.pipeline(
             pipeline_name="file_to_mssql_pipeline",
             destination=mssql(credentials=creds),
@@ -76,7 +77,7 @@ def load_file(ctx:typer.Context,
     """
     Load file into the specified target schema and table using the selected load strategy.
     """
-    creds = ctx.obj["creds"]
+    creds = resolve_credentials()
     pipeline = dlt.pipeline(
             pipeline_name="file_to_mssql_pipeline",
             destination=mssql(credentials=creds),
