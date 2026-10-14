@@ -30,6 +30,7 @@ def make_file_item(relative_path: str) -> FileItemDict:
         ("nested.dir/sales.xlsx", "xlsx"),
     ],
 )
+
 def test_get_file_extension(relative_path, expected):
     assert _get_file_extension(make_file_item(relative_path)) == expected
 

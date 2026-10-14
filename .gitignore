@@ -11,3 +11,4 @@ wheels/
 
 #secrets
 secrets.toml
+.env
