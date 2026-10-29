@@ -26,4 +26,5 @@ build-backend = "uv_build"
 dev = [
     "faker>=40.40.0",
     "pytest>=9.1.1",
+    "sqlalchemy>=2.1.6",
 ]

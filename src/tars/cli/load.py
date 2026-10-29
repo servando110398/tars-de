@@ -14,6 +14,7 @@ from tars.core.readers import read_excel , read_csv
 from dlt.common.storages.fsspec_filesystem import FileItemDict
 import os 
 from dlt.pipeline.exceptions import PipelineStepFailed
+from dlt.common.pipeline import LoadInfo
 """ 
 Build a single function for procesisng files that is reused by load_files and load_file. 
 
@@ -47,15 +48,23 @@ def load_files(
     failed_files = 0
     total_rows = 0
 
+  
     total_files = len(list(files))
     print(f"Folder: {source_folder}")
     print(f"Extension: {file_extension}")
     print(f"Files found: {total_files}")
 
+
+    if total_files == 0:
+        print("No files found in folder")
+        return files_processed, failed_files
+
+
     for file in list(files):  # snapshot the folder before moving anything
         print(f"Processing file : {file['file_name']} ...")
         load_info = _process_file(file=file, table_name=
                                   table_name, load_strategy=load_strategy, pipeline=pipeline)
+        
         if load_info.has_failed_jobs:
             failed_files += 1
         else:
@@ -63,10 +72,14 @@ def load_files(
             rows = sum(n for table, n in row_counts.items() if not table.startswith("_dlt"))
             total_rows += rows
             files_processed += 1
-            
+
+
+
     print(f"Processed files: {files_processed}")
     print(f"Total rows ingested: {total_rows}")
     print(f"Failed files: {failed_files}")
+
+    return files_processed, failed_files
 
 
 def load_file(ctx:typer.Context,
@@ -84,6 +97,9 @@ def load_file(ctx:typer.Context,
             dataset_name=schema_name  # This will map to a schema in SQL Server
         )
 
+    failed_files = 0
+    total_rows = 0
+
     bucket_url = os.path.dirname(os.path.abspath(file_name))
     # Grabs the very first FileItemDict directly out of the generator
     file_obj = next(iter(filesystem(bucket_url=bucket_url, file_glob=file_name)))
@@ -93,7 +109,7 @@ def load_file(ctx:typer.Context,
 
     if load_info.has_failed_jobs:
         failed_files += 1
-        message = f"[red]:x: load failed![/red] \n {load_info.errors}"    
+        message = f"[red]:x: load failed![/red] \n {getattr(load_info, 'errors', load_info)}"    
     else:
         #job_metrics = load_info.metrics.get("job_metrics", {})
 
@@ -106,7 +122,8 @@ def load_file(ctx:typer.Context,
         message = f"[green]:white_check_mark: Done. File {file_name} has been processed. \n{total_rows} rows ingested in {seconds:.2f} seconds[/green]"
 
     print(message)
-            
+
+    return failed_files, total_rows
 
 
 def _process_file(file: FileItemDict,table_name,load_strategy,pipeline):
@@ -133,7 +150,8 @@ def _process_file(file: FileItemDict,table_name,load_strategy,pipeline):
 
     except PipelineStepFailed as step_failed:
         # Extract the partial load info from the dlt exception (Scenario 1)
-        load_info = step_failed.step_info  
+        # only a LoadInfo has has_failed_jobs; a failed extract/normalize falls back to the dummy below
+        load_info = step_failed.step_info if isinstance(step_failed.step_info, LoadInfo) else None
         shutil.move(file_path, failed_dir / new_file_name)
 
     except Exception as e:
