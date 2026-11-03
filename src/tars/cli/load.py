@@ -26,7 +26,7 @@ strategy ={"csv":read_csv, "xls":read_excel , "xlsx":read_excel}
 
 def load_files(
         ctx:typer.Context,
-        source_folder:Annotated[str,typer.Argument(help="Path to the folder containing the files to be loaded.")] ,
+        source_folder:Annotated[str,typer.Argument(help="Path to the folder containing the files to be loaded.",  exists=True, file_okay=False, dir_okay=True, readable=True)] ,
         file_extension:Annotated[str,typer.Argument(help="File extension used to identify the files to be loaded.")],
         table_name : Annotated[str,typer.Argument(help="Name of the target table where the files will be loaded.")] ,
         schema_name:Annotated[str,typer.Argument(help="Name of the schema where the files will be loaded.")],
@@ -34,6 +34,8 @@ def load_files(
     """
     Load all files with the selected extension from the source folder into the target schema and table using the selected load strategy.
     """
+
+
     creds = resolve_credentials()
     pipeline = dlt.pipeline(
             pipeline_name="tars_file_loader",
@@ -41,10 +43,13 @@ def load_files(
             dataset_name=schema_name  
         )
 
+    folder = source_folder
+
     files = filesystem(
-        bucket_url=source_folder,
+        bucket_url=folder,
         file_glob=("*."+file_extension)  
         )
+
 
     files_processed = 0
     failed_files = 0
@@ -52,7 +57,7 @@ def load_files(
 
   
     total_files = len(list(files))
-    print(f"Folder: {source_folder}")
+    print(f"Folder: {folder}")
     print(f"Extension: {file_extension}")
     print(f"Files found: {total_files}")
 
@@ -103,25 +108,20 @@ def load_file(ctx:typer.Context,
             dataset_name=schema_name  # This will map to a schema in SQL Server
         )
 
-
     absolute_path = os.path.abspath(file_path)
     bucket_url = os.path.dirname(os.path.abspath(absolute_path))
     strict_glob = os.path.basename(absolute_path)    
-    file_obj = next(iter(filesystem(bucket_url=bucket_url, file_glob=strict_glob)))
-
-    #print(file_obj)
+    file_resource = filesystem(bucket_url=bucket_url, file_glob=strict_glob)
+    file_obj = next(iter(file_resource))
 
     print(f"Processing file : {strict_glob} ...")
     load_info = _process_file(file=file_obj, table_name=table_name, load_strategy=load_strategy, pipeline=pipeline)
-
-    #print(load_info)
 
     if load_info.has_failed_jobs:
         failed_files += 1
         # A real LoadInfo has no .errors; its str() lists the failed jobs instead
         message = f"[red]:x: load failed![/red] \n {getattr(load_info, 'errors', load_info)}"
     else:
-        #job_metrics = load_info.metrics.get("job_metrics", {})
 
         row_counts = pipeline.last_trace.last_normalize_info.row_counts
         total_rows = sum(n for table, n in row_counts.items() if not table.startswith("_dlt"))
@@ -142,7 +142,6 @@ def _process_file(file: FileItemDict,table_name,load_strategy,pipeline):
     Process a single file and return the load info object.
     """
 
-
     file_extension = _get_file_extension(file)
     load_dt_tm = datetime.now()  # one timestamp per load, stamped on every row
     reader = (
@@ -150,22 +149,9 @@ def _process_file(file: FileItemDict,table_name,load_strategy,pipeline):
         .with_name(table_name)
         .add_map(lambda row: {**row, "loadDtTm": load_dt_tm})
     )
-    file_path = Path(file["relative_path"])
-
+    file_path = Path(file.local_file_path)
     file_name = Path(file["file_name"])
-    
-    parsed_path = urlparse(file["file_url"]).path
-
-    if parsed_path.startswith('/'):
-        parsed_path = parsed_path.lstrip('/')
-
-    source_folder = Path(parsed_path).parent
-        
-    #print(f"parsed path {parsed_path}")
-    
-    #print(file)
-
-    #print(f"source folder {source_folder}")
+    source_folder = file_path.parent
 
     timestamp = load_dt_tm.strftime("%Y%m%d-%H%M%S")
     archive_dir , failed_dir = setup_folders(source_folder=source_folder)
@@ -178,9 +164,9 @@ def _process_file(file: FileItemDict,table_name,load_strategy,pipeline):
 
         # Check for dlt's internal job failures (Scenario 2)
         if load_info.has_failed_jobs:
-            shutil.move(parsed_path, failed_dir / new_file_name)
+            shutil.move(file_path, failed_dir / new_file_name)
         else:
-            shutil.move(parsed_path, archive_dir / new_file_name)
+            shutil.move(file_path, archive_dir / new_file_name)
 
     except PipelineStepFailed as step_failed:
         # Extract the partial load info from the dlt exception (Scenario 1).
@@ -189,7 +175,7 @@ def _process_file(file: FileItemDict,table_name,load_strategy,pipeline):
         if isinstance(step_failed.step_info, LoadInfo):
             load_info = step_failed.step_info
         error_message = str(step_failed)
-        shutil.move(parsed_path, failed_dir / new_file_name)
+        shutil.move(file_path, failed_dir / new_file_name)
 
     except Exception as e:
         # Catch-all for non-dlt exceptions (like OS/File errors)

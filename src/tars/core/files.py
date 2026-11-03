@@ -1,8 +1,8 @@
 from pathlib import Path
 from dlt.common.storages.fsspec_filesystem import FileItemDict
 
-def setup_folders(source_folder):
-    source = Path(source_folder)
+def setup_folders(source_folder:Path):
+    source = source_folder
     archive_dir = source / "Archive"
     failed_dir = source / "Failed"
     archive_dir.mkdir(exist_ok=True)
