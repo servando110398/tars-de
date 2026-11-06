@@ -22,7 +22,7 @@ Build a single function for procesisng files that is reused by load_files and lo
 
 """
 
-strategy ={"csv":read_csv, "xls":read_excel , "xlsx":read_excel,"csv":read_csv}
+strategy ={"csv":read_csv, "xls":read_excel , "xlsx":read_excel,"txt":read_csv}
 
 def load_files(
         ctx:typer.Context,
