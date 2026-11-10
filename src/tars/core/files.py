@@ -15,5 +15,7 @@ def _get_file_extension(file_obj: FileItemDict) -> str:
     # Extract extension natively without the dot, and lowercased
     # .suffix gets '.csv' -> .lstrip('.') leaves 'csv'
     ext = Path(path_str).suffix.lstrip('.').lower()
+    print(f"extracted file extension {ext}")
     return ext
+
 

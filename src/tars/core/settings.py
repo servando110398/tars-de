@@ -2,7 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-
+import pyodbc
 import typer
 from rich import print
 
@@ -72,7 +72,7 @@ def build_credentials(server_name , database_name , auth="windows" , username=""
         "host": server_name,
         "database": database_name,
         "port": 1433,
-        "driver": "ODBC Driver 18 for SQL Server",
+        "driver": next((d for d in pyodbc.drivers() if "SQL Server" in d), "SQL Server"),
         "query": {
             "Encrypt": "yes",
             "TrustServerCertificate": "yes"
